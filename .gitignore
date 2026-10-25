@@ -1,0 +1,24 @@
+
+# Gradle
+.gradle/
+build/
+
+# Java
+*.class
+
+# IntelliJ
+.idea/
+*.iml
+out/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Operating system
+.DS_Store
+Thumbs.db
