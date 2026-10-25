@@ -1,7 +1,7 @@
 # Read Me First
 The following was discovered as part of building this project:
 
-* The original package name 'com.surya.distributed-data-platform' is invalid and this project uses 'com.surya.distributed_data_platform' instead.
+* The original package name 'com.surya.distributed-data-platform' is invalid and this project uses 'com.surya.DistributedDataPlatform' instead.
 
 # Getting Started
 

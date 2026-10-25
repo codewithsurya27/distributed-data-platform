@@ -1,4 +1,4 @@
-package com.surya.distributed_data_platform;
+package com.surya.DistributedDataPlatform;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
