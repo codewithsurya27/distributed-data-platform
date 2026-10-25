@@ -1,4 +1,4 @@
-package com.surya.distributed_data_platform;
+package com.surya.DistributedDataPlatform;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
