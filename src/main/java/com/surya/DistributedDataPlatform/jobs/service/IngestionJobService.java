@@ -37,4 +37,10 @@ public class IngestionJobService {
     public Page<IngestionJobResponse> findAll(Pageable pageable) {
         return repository.findAll(pageable).map(IngestionJobResponse::from);
     }
+
+    @Transactional
+    public IngestionJobResponse create(String fileName, String filePath) {
+        IngestionJob job = new IngestionJob(fileName.trim(), filePath);
+        return IngestionJobResponse.from(repository.save(job));
+    }
 }
