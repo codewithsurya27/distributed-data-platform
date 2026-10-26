@@ -79,6 +79,25 @@ class IngestionJobApiIntegrationTests {
     }
 
     @Test
+    void createsJobWithOptionalFilePath() throws Exception {
+        MvcResult result = mockMvc.perform(post(JOBS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"fileName":"customers.csv","filePath":"uploads/customers.csv"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.filePath").value("uploads/customers.csv"))
+                .andReturn();
+
+        String path = URI.create(result.getResponse().getHeader("Location")).getPath();
+        UUID id = UUID.fromString(path.substring(path.lastIndexOf('/') + 1));
+
+        mockMvc.perform(get(JOBS_URL + "/" + id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.filePath").value("uploads/customers.csv"));
+    }
+
+    @Test
     void returnsNotFoundForUnknownJobAndBadRequestForMalformedId() throws Exception {
         mockMvc.perform(get(JOBS_URL + "/" + UUID.randomUUID()))
                 .andExpect(status().isNotFound())
@@ -101,6 +120,21 @@ class IngestionJobApiIntegrationTests {
     }
 
     @Test
+    void rejectsMissingAndOversizedFileNames() throws Exception {
+        mockMvc.perform(post(JOBS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.validationErrors.fileName").exists());
+
+        mockMvc.perform(post(JOBS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fileName\":\"" + "x".repeat(256) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.validationErrors.fileName").exists());
+    }
+
+    @Test
     void listsJobsInPages() throws Exception {
         createJob("first.csv");
         createJob("second.csv");
@@ -113,8 +147,28 @@ class IngestionJobApiIntegrationTests {
     }
 
     @Test
+    void usesDefaultPaginationWhenParametersAreOmitted() throws Exception {
+        createJob("first.csv");
+        createJob("second.csv");
+
+        mockMvc.perform(get(JOBS_URL))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.number").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.content", hasSize(2)));
+    }
+
+    @Test
     void rejectsPageSizesOutsideSupportedRange() throws Exception {
         mockMvc.perform(get(JOBS_URL).param("size", "101"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.validationErrors").isNotEmpty());
+
+        mockMvc.perform(get(JOBS_URL).param("size", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.validationErrors").isNotEmpty());
+
+        mockMvc.perform(get(JOBS_URL).param("page", "-1"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.validationErrors").isNotEmpty());
     }
