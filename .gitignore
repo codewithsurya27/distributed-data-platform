@@ -22,3 +22,5 @@ out/
 # Operating system
 .DS_Store
 Thumbs.db
+
+/uploads/
