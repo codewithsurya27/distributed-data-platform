@@ -102,4 +102,27 @@ public class IngestionJob {
     public OffsetDateTime getCompletedAt() {
         return completedAt;
     }
+
+    public void startProcessing() {
+        this.status = IngestionJobStatus.PROCESSING;
+        this.startedAt = OffsetDateTime.now();
+    }
+
+    public void updateProgress(long total, long processed, long failed) {
+        this.totalRows = total;
+        this.processedRows = processed;
+        this.failedRows = failed;
+    }
+
+    public void complete(boolean hasErrors) {
+        this.status = hasErrors
+                ? IngestionJobStatus.COMPLETED_WITH_ERRORS
+                : IngestionJobStatus.COMPLETED;
+        this.completedAt = OffsetDateTime.now();
+    }
+
+    public void fail() {
+        this.status = IngestionJobStatus.FAILED;
+        this.completedAt = OffsetDateTime.now();
+    }
 }
