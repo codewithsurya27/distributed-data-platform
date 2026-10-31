@@ -1,6 +1,6 @@
 package com.surya.DistributedDataPlatform.jobs.controller;
 
-
+import com.surya.DistributedDataPlatform.jobs.dto.CreateIngestionJobRequest;
 import com.surya.DistributedDataPlatform.jobs.dto.CsvUploadResponse;
 import com.surya.DistributedDataPlatform.jobs.dto.IngestionJobResponse;
 import com.surya.DistributedDataPlatform.jobs.service.CsvStorageService;
@@ -31,6 +31,7 @@ public class CsvUploadController {
             CsvValidationService validationService,
             CsvStorageService storageService,
             IngestionJobService jobService) {
+
         this.validationService = validationService;
         this.storageService = storageService;
         this.jobService = jobService;
@@ -40,31 +41,44 @@ public class CsvUploadController {
     public ResponseEntity<CsvUploadResponse> upload(
             @RequestPart("file") MultipartFile file) {
 
-        // Validate the CSV file for size, type, and required headers
+        // Validate uploaded CSV.
         validationService.validate(file);
 
         String filePath = null;
 
         try {
+            // Store CSV file.
             filePath = storageService.store(file);
 
-            IngestionJobResponse job = jobService.create(
-                    file.getOriginalFilename(),
-                    filePath);
+            // Create job and outbox event in one DB transaction.
+            CreateIngestionJobRequest request =
+                    new CreateIngestionJobRequest(
+                            file.getOriginalFilename(),
+                            filePath
+                    );
+
+            IngestionJobResponse job = jobService.create(request);
 
             CsvUploadResponse response = new CsvUploadResponse(
                     job.id(),
                     file.getOriginalFilename(),
                     "PENDING",
-                    "File uploaded successfully");
+                    "File uploaded successfully"
+            );
 
             return ResponseEntity.accepted().body(response);
 
         } catch (IOException ex) {
+
             throw new ResponseStatusException(
                     HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Could not store uploaded CSV", ex);
+                    "Could not store uploaded CSV",
+                    ex
+            );
+
         } catch (RuntimeException ex) {
+
+            // Remove uploaded file if job creation fails.
             if (filePath != null) {
                 try {
                     storageService.delete(filePath);
@@ -72,6 +86,7 @@ public class CsvUploadController {
                     ex.addSuppressed(cleanupException);
                 }
             }
+
             throw ex;
         }
     }
