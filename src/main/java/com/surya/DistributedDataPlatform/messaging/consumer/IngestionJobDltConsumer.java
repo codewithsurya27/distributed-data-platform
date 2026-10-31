@@ -1,7 +1,7 @@
+
 package com.surya.DistributedDataPlatform.messaging.consumer;
 
 import com.surya.DistributedDataPlatform.messaging.event.IngestionJobEvent;
-import com.surya.DistributedDataPlatform.processing.service.BatchPersistenceService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,11 +14,11 @@ public class IngestionJobDltConsumer {
     private static final Logger log =
             LoggerFactory.getLogger(IngestionJobDltConsumer.class);
 
-    private final BatchPersistenceService persistenceService;
+    private final ProcessedDltEventService processedDltEventService;
 
     public IngestionJobDltConsumer(
-            BatchPersistenceService persistenceService) {
-        this.persistenceService = persistenceService;
+            ProcessedDltEventService processedDltEventService) {
+        this.processedDltEventService = processedDltEventService;
     }
 
     @KafkaListener(
@@ -27,12 +27,23 @@ public class IngestionJobDltConsumer {
     )
     public void handleDeadLetter(IngestionJobEvent event) {
 
-        log.error(
-                "Ingestion job {} moved to dead-letter topic. Event ID: {}",
-                event.jobId(),
-                event.eventId()
+        boolean handled = processedDltEventService.handleDltEvent(
+                event.eventId(),
+                event.jobId()
         );
 
-        persistenceService.fail(event.jobId());
+        if (handled) {
+            log.error(
+                    "DLT event {} handled for ingestion job {}",
+                    event.eventId(),
+                    event.jobId()
+            );
+        } else {
+            log.info(
+                    "Duplicate DLT event {} ignored for job {}",
+                    event.eventId(),
+                    event.jobId()
+            );
+        }
     }
 }
