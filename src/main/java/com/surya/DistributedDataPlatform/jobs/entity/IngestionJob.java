@@ -125,4 +125,10 @@ public class IngestionJob {
         this.status = IngestionJobStatus.FAILED;
         this.completedAt = OffsetDateTime.now();
     }
+
+    public void resetForRetry() {
+        this.status = IngestionJobStatus.PENDING;
+        this.startedAt = null;
+        this.completedAt = null;
+    }
 }

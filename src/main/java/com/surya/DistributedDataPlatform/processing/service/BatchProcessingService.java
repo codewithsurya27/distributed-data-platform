@@ -42,65 +42,107 @@ public class BatchProcessingService {
     }
 
     public void process(UUID jobId) {
-        IngestionJob job = jobRepository.findById(jobId)
-                .orElseThrow();
 
-        Path file = Path.of(job.getFilePath());
+        boolean claimed = persistenceService.claimJob(jobId);
 
-        if (!Files.isRegularFile(file)) {
-            persistenceService.fail(jobId);
+        if (!claimed) {
             return;
         }
 
-        persistenceService.start(jobId);
+        try {
+            IngestionJob job = jobRepository.findById(jobId)
+                    .orElseThrow();
 
-        long total = 0;
-        long failed = 0;
-        long processed = 0;
-
-        List<CustomerRecord> validBatch = new ArrayList<>();
-        List<IngestionError> errorBatch = new ArrayList<>();
-
-        try (CSVParser csvParser = parser.parse(file)) {
-            for (CSVRecord row : csvParser) {
-                total++;
-
-                String validationError = validator.validate(row);
-
-                if (validationError != null) {
-                    failed++;
-                    errorBatch.add(new IngestionError(
-                            jobId, row.getRecordNumber() + 1,
-                            "VALIDATION_ERROR", validationError));
-                } else {
-                    validBatch.add(new CustomerRecord(
-                            jobId,
-                            validator.value(row, "customerId"),
-                            validator.value(row, "name"),
-                            validator.value(row, "email")));
-                }
-
-                processed++;
-
-                if (processed % batchSize == 0) {
-                    persistenceService.saveBatch(
-                            jobId, validBatch, errorBatch,
-                            total, processed, failed);
-                    validBatch = new ArrayList<>();
-                    errorBatch = new ArrayList<>();
-                }
+            if (job.getFilePath() == null || job.getFilePath().isBlank()) {
+                throw new IllegalStateException(
+                        "No file path configured for job: " + jobId);
             }
 
-            if (!validBatch.isEmpty() || !errorBatch.isEmpty()) {
-                persistenceService.saveBatch(
-                        jobId, validBatch, errorBatch,
-                        total, processed, failed);
+            Path file = Path.of(job.getFilePath());
+
+            if (!Files.isRegularFile(file)) {
+                throw new IllegalStateException(
+                        "CSV file does not exist: " + file);
+            }
+
+            // Remove partial data from any previous attempt.
+            persistenceService.prepareAttempt(jobId);
+
+            long total = 0;
+            long failed = 0;
+            long processed = 0;
+
+            List<CustomerRecord> validBatch = new ArrayList<>();
+            List<IngestionError> errorBatch = new ArrayList<>();
+
+            try (CSVParser csvParser = parser.parse(file)) {
+
+                for (CSVRecord row : csvParser) {
+                    total++;
+
+                    String validationError = validator.validate(row);
+
+                    if (validationError != null) {
+                        failed++;
+
+                        errorBatch.add(new IngestionError(
+                                jobId,
+                                row.getRecordNumber() + 1,
+                                "VALIDATION_ERROR",
+                                validationError
+                        ));
+                    } else {
+                        validBatch.add(new CustomerRecord(
+                                jobId,
+                                validator.value(row, "customerId"),
+                                validator.value(row, "name"),
+                                validator.value(row, "email")
+                        ));
+                    }
+
+                    processed++;
+
+                    if (processed % batchSize == 0) {
+                        persistenceService.saveBatch(
+                                jobId,
+                                validBatch,
+                                errorBatch,
+                                total,
+                                processed,
+                                failed
+                        );
+
+                        validBatch = new ArrayList<>();
+                        errorBatch = new ArrayList<>();
+                    }
+                }
+
+                if (!validBatch.isEmpty() || !errorBatch.isEmpty()) {
+                    persistenceService.saveBatch(
+                            jobId,
+                            validBatch,
+                            errorBatch,
+                            total,
+                            processed,
+                            failed
+                    );
+                }
             }
 
             persistenceService.finish(jobId, failed > 0);
 
-        } catch (IOException | RuntimeException ex) {
-            persistenceService.fail(jobId);
+        } catch (IOException | RuntimeException exception) {
+
+            try {
+                persistenceService.releaseForRetry(jobId);
+            } catch (RuntimeException releaseException) {
+                exception.addSuppressed(releaseException);
+            }
+
+            throw new IllegalStateException(
+                    "Failed to process ingestion job: " + jobId,
+                    exception
+            );
         }
     }
 }
