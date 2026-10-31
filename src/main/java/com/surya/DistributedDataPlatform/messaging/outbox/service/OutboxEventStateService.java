@@ -8,6 +8,9 @@ import com.surya.DistributedDataPlatform.messaging.outbox.repository.OutboxEvent
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Value;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,12 +21,18 @@ public class OutboxEventStateService {
 
     private final OutboxEventRepository outboxEventRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final int maxAttempts;
+
+    private static final Logger log = LoggerFactory.getLogger(OutboxEventStateService.class);
 
     public OutboxEventStateService(
             OutboxEventRepository outboxEventRepository,
-            JdbcTemplate jdbcTemplate) {
+            JdbcTemplate jdbcTemplate,
+            @Value("${app.outbox.max-attempts:3}") int maxAttempts) {
+
         this.outboxEventRepository = outboxEventRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.maxAttempts = maxAttempts;
     }
 
     @Transactional
@@ -88,17 +97,21 @@ public class OutboxEventStateService {
                 .orElseThrow(() -> new IllegalStateException(
                         "Outbox event not found: " + eventId));
 
-        event.recordFailure(exception);
+        event.recordFailure(exception, maxAttempts);
 
-        // Make the event eligible for another publishing attempt.
-        jdbcTemplate.update(
-                """
-                UPDATE outbox_events
-                SET status = 'PENDING'
-                WHERE id = ?
-                  AND status = 'PROCESSING'
-                """,
-                eventId
-        );
+        if (event.getStatus() == OutboxStatus.FAILED) {
+            log.error(
+                    "Outbox event {} permanently failed after {} attempts",
+                    eventId,
+                    event.getAttempts()
+            );
+        } else {
+            log.warn(
+                    "Outbox event {} failed. Attempt {}/{}. It will be retried.",
+                    eventId,
+                    event.getAttempts(),
+                    maxAttempts
+            );
+        }
     }
 }

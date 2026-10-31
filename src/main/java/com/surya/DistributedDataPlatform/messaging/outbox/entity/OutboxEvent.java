@@ -56,7 +56,7 @@ public class OutboxEvent {
         this.lastError = null;
     }
 
-    public void recordFailure(Exception exception) {
+    public void recordFailure(Exception exception, int maxAttempts) {
         this.attempts++;
 
         String message = exception.getMessage();
@@ -66,6 +66,12 @@ public class OutboxEvent {
                 : message.substring(0, Math.min(message.length(), 2000));
 
         this.processingStartedAt = null;
+
+        if (this.attempts >= maxAttempts) {
+            this.status = OutboxStatus.FAILED;
+        } else {
+            this.status = OutboxStatus.PENDING;
+        }
     }
 
     public void markProcessing() {
