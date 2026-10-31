@@ -1,3 +1,4 @@
+
 package com.surya.DistributedDataPlatform.messaging.consumer;
 
 import com.surya.DistributedDataPlatform.messaging.event.IngestionJobEvent;
@@ -11,14 +12,16 @@ import org.springframework.stereotype.Component;
 public class IngestionJobConsumer {
 
     private final BatchProcessingService processingService;
+    private final ProcessedEventService processedEventService;
     private final boolean testFailEnabled;
 
     public IngestionJobConsumer(
             BatchProcessingService processingService,
-            @Value("${app.kafka.test-fail-enabled:false}")
-            boolean testFailEnabled) {
+            ProcessedEventService processedEventService,
+            @Value("${app.kafka.test-fail-enabled:false}") boolean testFailEnabled) {
 
         this.processingService = processingService;
+        this.processedEventService = processedEventService;
         this.testFailEnabled = testFailEnabled;
     }
 
@@ -27,16 +30,30 @@ public class IngestionJobConsumer {
             groupId = "${spring.kafka.consumer.group-id}"
     )
     public void consume(IngestionJobEvent event) {
-        System.out.println(
-                "Kafka test failure enabled: " + testFailEnabled
+
+        boolean claimed = processedEventService.claimEvent(
+                event.eventId(),
+                event.jobId()
         );
 
-        if (testFailEnabled) {
-            throw new IllegalStateException(
-                    "TEST FAILURE: Simulating Kafka consumer failure"
-            );
+        if (!claimed) {
+            return;
         }
 
-        processingService.process(event.jobId());
+        try {
+            if (testFailEnabled) {
+                throw new RuntimeException("Intentional test failure for DLT verification");
+            }
+
+            processingService.process(event.jobId());
+
+            processedEventService.markCompleted(event.eventId());
+
+        } catch (RuntimeException exception) {
+
+            processedEventService.releaseEvent(event.eventId());
+
+            throw exception;
+        }
     }
 }

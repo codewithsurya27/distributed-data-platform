@@ -1,3 +1,4 @@
+
 package com.surya.DistributedDataPlatform.processing.service;
 
 import com.surya.DistributedDataPlatform.jobs.entity.IngestionJob;
@@ -16,7 +17,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -75,6 +78,9 @@ public class BatchProcessingService {
             List<CustomerRecord> validBatch = new ArrayList<>();
             List<IngestionError> errorBatch = new ArrayList<>();
 
+            // Track customer IDs across the entire CSV, including batches.
+            Set<String> seenCustomerIds = new HashSet<>();
+
             try (CSVParser csvParser = parser.parse(file)) {
 
                 for (CSVRecord row : csvParser) {
@@ -91,13 +97,29 @@ public class BatchProcessingService {
                                 "VALIDATION_ERROR",
                                 validationError
                         ));
+
                     } else {
-                        validBatch.add(new CustomerRecord(
-                                jobId,
-                                validator.value(row, "customerId"),
-                                validator.value(row, "name"),
-                                validator.value(row, "email")
-                        ));
+                        String customerId =
+                                validator.value(row, "customerId");
+
+                        if (!seenCustomerIds.add(customerId)) {
+                            failed++;
+
+                            errorBatch.add(new IngestionError(
+                                    jobId,
+                                    row.getRecordNumber() + 1,
+                                    "DUPLICATE_CUSTOMER_ID",
+                                    "Duplicate customerId found: " + customerId
+                            ));
+
+                        } else {
+                            validBatch.add(new CustomerRecord(
+                                    jobId,
+                                    customerId,
+                                    validator.value(row, "name"),
+                                    validator.value(row, "email")
+                            ));
+                        }
                     }
 
                     processed++;

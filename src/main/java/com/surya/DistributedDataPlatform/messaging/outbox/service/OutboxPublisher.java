@@ -41,7 +41,7 @@ public class OutboxPublisher {
     public void publishPendingEvents() {
 
         List<OutboxEvent> pendingEvents =
-                stateService.findPendingEvents(batchSize);
+                stateService.claimPendingEvents(batchSize);
 
         for (OutboxEvent event : pendingEvents) {
             publishEvent(event);

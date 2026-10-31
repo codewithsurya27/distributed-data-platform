@@ -31,6 +31,9 @@ public class OutboxEvent {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    @Column(name = "processing_started_at")
+    private Instant processingStartedAt;
+
     @Column(name = "last_error", length = 2000)
     private String lastError;
 
@@ -49,16 +52,31 @@ public class OutboxEvent {
     public void markPublished() {
         this.status = OutboxStatus.PUBLISHED;
         this.publishedAt = Instant.now();
+        this.processingStartedAt = null;
         this.lastError = null;
     }
 
-    public void recordFailure(Exception exception) {
+    public void recordFailure(Exception exception, int maxAttempts) {
         this.attempts++;
+
         String message = exception.getMessage();
 
         this.lastError = message == null
                 ? exception.getClass().getSimpleName()
                 : message.substring(0, Math.min(message.length(), 2000));
+
+        this.processingStartedAt = null;
+
+        if (this.attempts >= maxAttempts) {
+            this.status = OutboxStatus.FAILED;
+        } else {
+            this.status = OutboxStatus.PENDING;
+        }
+    }
+
+    public void markProcessing() {
+        this.status = OutboxStatus.PROCESSING;
+        this.processingStartedAt = Instant.now();
     }
 
     public UUID getId() {
@@ -79,5 +97,9 @@ public class OutboxEvent {
 
     public OutboxStatus getStatus() {
         return status;
+    }
+
+    public Instant getProcessingStartedAt() {
+        return processingStartedAt;
     }
 }
