@@ -40,7 +40,8 @@ public class OutboxEventStateService {
                     LIMIT ?
                 )
                 UPDATE outbox_events AS event
-                SET status = 'PROCESSING'
+                SET status = 'PROCESSING',
+                processing_started_at = CURRENT_TIMESTAMP
                 FROM selected_events
                 WHERE event.id = selected_events.id
                 RETURNING event.id
