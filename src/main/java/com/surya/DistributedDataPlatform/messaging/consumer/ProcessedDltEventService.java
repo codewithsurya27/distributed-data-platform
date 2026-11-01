@@ -1,8 +1,7 @@
-
 package com.surya.DistributedDataPlatform.messaging.consumer;
 
 import com.surya.DistributedDataPlatform.processing.service.BatchPersistenceService;
-
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,17 +13,21 @@ import java.util.UUID;
 @Service
 public class ProcessedDltEventService {
 
-    private static final Logger log = LoggerFactory.getLogger(ProcessedDltEventService.class);
+    private static final Logger log =
+            LoggerFactory.getLogger(ProcessedDltEventService.class);
 
     private final JdbcTemplate jdbcTemplate;
     private final BatchPersistenceService persistenceService;
+    private final MeterRegistry meterRegistry;
 
     public ProcessedDltEventService(
             JdbcTemplate jdbcTemplate,
-            BatchPersistenceService persistenceService) {
+            BatchPersistenceService persistenceService,
+            MeterRegistry meterRegistry) {
 
         this.jdbcTemplate = jdbcTemplate;
         this.persistenceService = persistenceService;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -49,6 +52,9 @@ public class ProcessedDltEventService {
         }
 
         persistenceService.fail(jobId);
+
+        meterRegistry.counter("ingestion.jobs.failed").increment();
+
         return true;
     }
 }

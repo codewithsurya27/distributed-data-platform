@@ -6,6 +6,7 @@ import com.surya.DistributedDataPlatform.jobs.entity.IngestionJob;
 import com.surya.DistributedDataPlatform.jobs.repository.IngestionJobRepository;
 import com.surya.DistributedDataPlatform.messaging.outbox.service.OutboxService;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -24,13 +25,16 @@ public class IngestionJobService {
 
     private final IngestionJobRepository ingestionJobRepository;
     private final OutboxService outboxService;
+    private final MeterRegistry meterRegistry;
 
     public IngestionJobService(
             IngestionJobRepository ingestionJobRepository,
-            OutboxService outboxService
+            OutboxService outboxService,
+            MeterRegistry meterRegistry
     ) {
         this.ingestionJobRepository = ingestionJobRepository;
         this.outboxService = outboxService;
+        this.meterRegistry = meterRegistry;
     }
 
     // Create job and outbox event in the SAME transaction.
@@ -47,6 +51,7 @@ public class IngestionJobService {
 
         // Save outbox event in the same transaction.
         outboxService.createJobEvent(savedJob.getId());
+        meterRegistry.counter("ingestion.jobs.created").increment();
 
         log.info("Created ingestion job {} for file {}", savedJob.getId(), request.fileName());
 
