@@ -1,16 +1,29 @@
-name: CI
+name: Java CI
 
 on:
-  pull_request:
-    branches:
-      - main
   push:
     branches:
       - main
+      - feature/docker-ci-deployment
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: java-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-test:
+    name: Build and Test
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:17
@@ -25,11 +38,17 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+    env:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/dataplatform
+      SPRING_DATASOURCE_USERNAME: dataplatform
+      SPRING_DATASOURCE_PASSWORD: devpassword
+
     steps:
-      - name: Check out repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up Java 25
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -38,5 +57,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build and test
-        run: bash gradlew build --no-daemon
+      - name: Run tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew clean test --no-daemon
+
+      - name: Build Docker image
+        run: |
+          docker build -t distributed-data-platform:${{ github.sha }} .
