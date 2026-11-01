@@ -9,10 +9,11 @@ Dead Letter Topic (DLT) handling, consumer idempotency, duplicate
 customer-ID protection, concurrent outbox claiming, abandoned-event
 recovery, retry limits, DLT idempotency, and automated tests.
 
-Project status: Phases 1--5 are implemented. The latest reported
-automated test run completed with 26 tests, 0 failures, and 0
-skipped. Phase 6 (testing and observability) is the next planned
-phase.
+Project status: Phases 1--5 are implemented. Phase 6 is in progress:
+structured logging, Actuator health checks, Kafka health monitoring,
+and custom ingestion metrics have been implemented and verified.
+Outbox monitoring, observability tests, and final documentation
+verification remain in progress.
 Contents
 1. Overview
 2. Architecture
@@ -26,9 +27,8 @@ Contents
 9. Run locally
 10. API and verification
 11. Automated tests
-12. Implementation status and
-    roadmap
-13. Interview discussion points
+12. Observability and monitoring
+13. Implementation status and roadmap
 1. Overview
    The platform separates the synchronous upload request from background
    data processing. The API validates and stores the uploaded file, creates
@@ -591,89 +591,106 @@ The following behaviors were exercised during development:
 - DLT event handling was recorded in processed_dlt_events.
   These are development verification scenarios, not a claim of
   production-scale load or fault-injection testing.
-12. Implementation status and roadmap
+13. Implementation status and roadmap
     Phase                   Scope                   Status
     Phase 1                 Job metadata API        Complete
 
-Phase 2                 CSV upload and          Complete
-structural validation
+    Phase 2                 CSV upload and          Complete
+    structural validation
 
-Phase 3                 Asynchronous batch      Complete
-processing
+    Phase 3                 Asynchronous batch      Complete
+    processing
 
-Phase 4                 Kafka integration,      Complete
-Transactional Outbox,
-retries, and DLT
+    Phase 4                 Kafka integration,      Complete
+    Transactional Outbox,
+    retries, and DLT
 
-Phase 5                 Idempotency, duplicate  Complete
-protection,
-concurrency, recovery,
-retry limits, DLT
-idempotency, automated
-tests
+    Phase 5                 Idempotency, duplicate  Complete
+    protection,
+    concurrency, recovery,
+    retry limits, DLT
+    idempotency, automated
+    tests
 
-Phase 6                 Testing and             Planned
-observability
+    Phase 6                 Testing and             In progress
+    observability
 
-Phase 7                 Docker, CI, and         Planned
-deployment              
-Phase 8                 Final project           Planned
-documentation and
-operational guides
-Phase 6 --- Testing and observability
-Planned focus:
-- Improve automated test coverage for failure and recovery scenarios.
-- Add structured application logging with useful correlation
-  identifiers.
-- Expose application health and dependency health.
-- Add operational metrics for jobs, batches, outbox publishing,
-  retries, and DLT activity.
-- Improve monitoring and troubleshooting guidance.
-  Phase 7 --- Docker, CI, and deployment
-  Planned focus:
+    Phase 7                 Docker, CI, and         Planned
+    deployment
+
+    Phase 8                 Final project           Planned
+    documentation and
+    operational guides
+
+12. Observability and monitoring
+
+    12.1 Structured logging
+- Console application logs use Logstash-compatible structured JSON.
+- Application log levels are configured for INFO by default.
+- Request logging is implemented through RequestLoggingFilter.
+- Job processing logs include job correlation information through MDC.
+- Kafka consumer logs include job and event identifiers where available.
+- Batch processing logs report batch number, records read, valid records,
+  rejected records, and elapsed processing time.
+- Outbox publisher logs report publishing lifecycle activity.
+
+  12.2 Health monitoring
+  Spring Boot Actuator exposes application health information.
+
+| Endpoint | Purpose |
+|---|---|
+| `/actuator/health` | Overall application health |
+| `/actuator/health/db` | PostgreSQL health |
+| `/actuator/health/kafka` | Custom Kafka broker connectivity check |
+| `/actuator/health/liveness` | Application liveness |
+| `/actuator/health/readiness` | Application readiness |
+
+Health details and components are enabled in the local configuration.
+The custom KafkaHealthIndicator checks broker connectivity and reports
+broker information when available. It reports DOWN when Kafka cannot
+be reached. Both Kafka UP and DOWN behavior were manually verified.
+
+    12.3 Custom application metrics
+Micrometer metrics are exposed through Spring Boot Actuator.
+
+| Metric | Description |
+|---|---|
+| `ingestion.jobs.created` | Number of ingestion jobs created |
+| `ingestion.jobs.completed` | Number of jobs whose processing completed, including COMPLETED_WITH_ERRORS |
+| `ingestion.jobs.failed` | Number of jobs marked failed through DLT handling |
+| `ingestion.records.processed` | Number of valid records persisted |
+| `ingestion.records.rejected` | Number of rejected records persisted |
+| `ingestion.job.duration` | Ingestion job processing duration |
+
+The custom metrics are available through `/actuator/metrics` after
+their corresponding application events have occurred. The
+`ingestion.jobs.created` metric was verified at runtime and returned
+a count of 1.0 after a job was created. Unit tests use
+SimpleMeterRegistry to verify DLT failure metric behavior and ensure
+duplicate DLT events do not increment the failure counter.
+
+    12.4 Remaining observability work
+The following Phase 6 items are still to be implemented and verified:
+- Database-backed gauges for PENDING, PROCESSING, FAILED, and PUBLISHED
+  outbox event counts.
+- Tests for outbox monitoring metrics and any additional observability
+  behavior.
+- Final README review and full application verification after all
+  Phase 6 changes are complete.
+
+13. Implementation notes and roadmap
+    Phase 7 --- Docker, CI, and deployment
+    Planned focus:
 - Production-oriented Docker image and configuration.
 - CI workflow for build and automated tests.
 - Environment-specific configuration and secret handling.
 - Deployment and runtime documentation.
-13. Interview discussion points
-    Be prepared to explain:
-- Why CSV upload and processing are separated.
-- The difference between file-level and row-level validation.
-- How batch processing limits memory and database write sizes.
-- Why a Transactional Outbox is useful for reliable event publication.
-- How FOR UPDATE SKIP LOCKED helps coordinate concurrent publishers.
-- Why Kafka delivery may be repeated and why idempotency is important.
-- How the processed-event table protects against duplicate main-topic
-  events.
-- How duplicate customer IDs are handled within a CSV.
-- The difference between outbox publishing retries and Kafka listener
-  retries.
-- How exponential backoff and a DLT work.
-- How stale PROCESSING outbox events are recovered.
-- Why PUBLISHED does not mean an ingestion job is COMPLETED.
-- Why a failed job does not necessarily imply that every previously
-  committed database operation was rolled back.
-  Short project explanation
-  I built a distributed CSV ingestion and processing backend using Java,
-  Spring Boot, PostgreSQL, and Apache Kafka. The API accepts CSV uploads
-  and creates ingestion jobs, while background workers process the files
-  asynchronously in batches.
-
-I used the Transactional Outbox pattern to persist job events reliably
-before publishing them to Kafka. I implemented retry handling, a Dead
-Letter Topic, idempotent event handling, duplicate customer-ID
-validation, concurrent outbox claiming, and recovery of abandoned
-outbox events.
-
-PostgreSQL stores job metadata, customer records, validation errors,
-outbox events, and processed-event markers. I also added automated
-tests for the API, consumer idempotency, DLT handling, outbox state
-transitions, recovery, and CSV validation.
 
 Repository
 GitHub: https://github.com/codewithsurya27/distributed-data-platform
 
 The source code and Flyway migrations are the final source of truth for
-exact endpoint mappings, entity fields, and implementation details. This
-README summarizes the architecture and the Phase 1--5 implementation
-state described above.
+exact endpoint mappings, entity fields, and implementation details.
+This README summarizes the architecture and the Phase 1--5
+implementation, together with the Phase 6 observability work completed
+so far.

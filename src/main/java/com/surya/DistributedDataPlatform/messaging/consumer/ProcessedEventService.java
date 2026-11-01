@@ -1,6 +1,8 @@
 package com.surya.DistributedDataPlatform.messaging.consumer;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -8,6 +10,8 @@ import java.util.UUID;
 
 @Service
 public class ProcessedEventService {
+
+    private static final Logger log = LoggerFactory.getLogger(ProcessedEventService.class);
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -31,7 +35,11 @@ public class ProcessedEventService {
                 jobId
         );
 
-        return inserted == 1;
+        boolean claimed = inserted == 1;
+        if (!claimed) {
+            log.debug("Event {} for job {} was already claimed", eventId, jobId);
+        }
+        return claimed;
     }
 
     @Transactional
