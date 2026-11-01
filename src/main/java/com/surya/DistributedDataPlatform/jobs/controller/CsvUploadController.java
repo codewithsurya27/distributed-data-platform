@@ -6,6 +6,8 @@ import com.surya.DistributedDataPlatform.jobs.dto.IngestionJobResponse;
 import com.surya.DistributedDataPlatform.jobs.service.CsvStorageService;
 import com.surya.DistributedDataPlatform.jobs.service.CsvValidationService;
 import com.surya.DistributedDataPlatform.jobs.service.IngestionJobService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -22,6 +24,8 @@ import java.io.IOException;
 @RestController
 @RequestMapping("/api/v1/ingestion-jobs")
 public class CsvUploadController {
+
+    private static final Logger log = LoggerFactory.getLogger(CsvUploadController.class);
 
     private final CsvValidationService validationService;
     private final CsvStorageService storageService;
@@ -59,6 +63,8 @@ public class CsvUploadController {
 
             IngestionJobResponse job = jobService.create(request);
 
+            log.info("Accepted CSV upload for ingestion job {} (sizeBytes={})", job.id(), file.getSize());
+
             CsvUploadResponse response = new CsvUploadResponse(
                     job.id(),
                     file.getOriginalFilename(),
@@ -70,6 +76,8 @@ public class CsvUploadController {
 
         } catch (IOException ex) {
 
+            log.error("Could not store uploaded CSV (sizeBytes={})", file.getSize(), ex);
+
             throw new ResponseStatusException(
                     HttpStatus.INTERNAL_SERVER_ERROR,
                     "Could not store uploaded CSV",
@@ -78,11 +86,14 @@ public class CsvUploadController {
 
         } catch (RuntimeException ex) {
 
+            log.error("Could not create ingestion job for uploaded CSV; cleaning up stored file", ex);
+
             // Remove uploaded file if job creation fails.
             if (filePath != null) {
                 try {
                     storageService.delete(filePath);
                 } catch (IOException cleanupException) {
+                    log.warn("Could not remove uploaded CSV after job creation failed", cleanupException);
                     ex.addSuppressed(cleanupException);
                 }
             }

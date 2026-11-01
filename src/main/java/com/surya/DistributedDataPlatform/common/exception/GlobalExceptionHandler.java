@@ -2,6 +2,8 @@ package com.surya.DistributedDataPlatform.common.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -17,6 +19,8 @@ import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(IngestionJobNotFoundException.class)
     public ResponseEntity<ApiError> handleNotFound(
@@ -77,6 +81,7 @@ public class GlobalExceptionHandler {
                 request.getRequestURI(),
                 validationErrors
         );
+        log.warn("Returning HTTP {} for {}: {}", status.value(), request.getRequestURI(), message);
         return ResponseEntity.status(status).body(response);
     }
 }

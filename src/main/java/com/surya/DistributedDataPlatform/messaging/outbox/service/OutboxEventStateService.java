@@ -64,6 +64,8 @@ public class OutboxEventStateService {
             return List.of();
         }
 
+        log.debug("Claimed {} outbox events", claimedIds.size());
+
         List<OutboxEvent> events =
                 outboxEventRepository.findAllById(claimedIds);
 
