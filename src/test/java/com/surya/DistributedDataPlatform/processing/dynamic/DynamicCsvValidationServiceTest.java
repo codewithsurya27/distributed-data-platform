@@ -127,4 +127,67 @@ class DynamicCsvValidationServiceTest {
                 result.errors().get(0).errorCode()
         );
     }
+    @Test
+    void allowsIdentityColumnToBeOmittedFromCsv() throws Exception {
+        Path csv = tempDir.resolve("identity-default.csv");
+        Files.writeString(csv, """
+                name,status
+                Default Test User,NEW
+                """);
+
+        DestinationTableMetadata identityMetadata = new DestinationTableMetadata(
+                "public",
+                "phase9_defaults",
+                List.of(
+                        new DestinationColumnMetadata(
+                                "id", "bigint", "int8", false, null,
+                                null, 64, 0, true, 1, true, false
+                        ),
+                        new DestinationColumnMetadata(
+                                "name", "character varying", "varchar", false, null,
+                                100, null, null, false, 2
+                        ),
+                        new DestinationColumnMetadata(
+                                "status", "character varying", "varchar", false, "'NEW'::character varying",
+                                30, null, null, false, 3
+                        )
+                )
+        );
+
+        DynamicCsvValidationResult result = service.validate(csv, identityMetadata);
+
+        assertEquals(1, result.totalRows());
+        assertEquals(1, result.getValidRowCount());
+        assertEquals(0, result.getFailedRowCount());
+        assertFalse(result.validRows().get(0).values().containsKey("id"));
+    }
+
+    @Test
+    void rejectsGeneratedColumnWhenCsvSuppliesIt() throws Exception {
+        Path csv = tempDir.resolve("generated-column.csv");
+        Files.writeString(csv, "id,name\n1,Test User\n");
+
+        DestinationTableMetadata generatedMetadata = new DestinationTableMetadata(
+                "public",
+                "generated_table",
+                List.of(
+                        new DestinationColumnMetadata(
+                                "id", "bigint", "int8", false, null,
+                                null, 64, 0, true, 1, false, true
+                        ),
+                        new DestinationColumnMetadata(
+                                "name", "character varying", "varchar", false, null,
+                                100, null, null, false, 2
+                        )
+                )
+        );
+
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> service.validate(csv, generatedMetadata)
+        );
+
+        assertTrue(exception.getMessage().contains("Generated destination column"));
+    }
+
 }

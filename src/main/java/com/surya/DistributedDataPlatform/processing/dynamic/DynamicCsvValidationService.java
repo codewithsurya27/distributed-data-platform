@@ -196,6 +196,13 @@ public class DynamicCsvValidationService {
                 );
             }
 
+            if (column.generated()) {
+                throw new IllegalArgumentException(
+                        "Generated destination column must not be supplied in CSV: "
+                                + column.columnName()
+                );
+            }
+
             if (!mappedColumns.add(normalizedHeader)) {
                 throw new IllegalArgumentException(
                         "Duplicate CSV column mapping: " + header
@@ -224,7 +231,9 @@ public class DynamicCsvValidationService {
 
             boolean required =
                     !column.nullable()
-                            && column.defaultValue() == null;
+                            && column.defaultValue() == null
+                            && !column.identity()
+                            && !column.generated();
 
             if (required
                     && !mappedColumns.contains(

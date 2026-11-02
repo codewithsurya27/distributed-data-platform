@@ -77,6 +77,8 @@ public class PostgreSqlDestinationService {
                             c.numeric_precision,
                             c.numeric_scale,
                             c.ordinal_position,
+                            c.is_identity,
+                            c.is_generated,
                             EXISTS (
                                 SELECT 1
                                 FROM information_schema.table_constraints tc
@@ -106,7 +108,9 @@ public class PostgreSqlDestinationService {
                                 toInteger(rs.getObject("numeric_precision")),
                                 toInteger(rs.getObject("numeric_scale")),
                                 rs.getBoolean("is_primary_key"),
-                                rs.getInt("ordinal_position")
+                                rs.getInt("ordinal_position"),
+                                "YES".equals(rs.getString("is_identity")),
+                                !"NEVER".equals(rs.getString("is_generated"))
                         ),
                         schema,
                         table
