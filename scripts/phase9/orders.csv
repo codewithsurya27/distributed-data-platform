@@ -1,0 +1,4 @@
+order_id,customer_name,product_name,quantity,unit_price
+5001,Alice Johnson,Laptop,1,75000.00
+5002,Bob Smith,Keyboard,2,2500.00
+5003,Charlie Brown,Mouse,3,850.00

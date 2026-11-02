@@ -1,3 +1,4 @@
+
 package com.surya.DistributedDataPlatform.jobs.entity;
 
 import jakarta.persistence.Column;
@@ -16,6 +17,7 @@ import java.util.UUID;
 public class IngestionJob {
 
     @Id
+    @Column(nullable = false, updatable = false)
     private UUID id;
 
     @Column(name = "file_name", nullable = false, length = 255)
@@ -23,6 +25,12 @@ public class IngestionJob {
 
     @Column(name = "file_path", length = 1000)
     private String filePath;
+
+    @Column(name = "target_schema", length = 63)
+    private String targetSchema;
+
+    @Column(name = "target_table", length = 63)
+    private String targetTable;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 40)
@@ -49,17 +57,51 @@ public class IngestionJob {
     protected IngestionJob() {
     }
 
+    // Retained for existing code and tests.
     public IngestionJob(String fileName, String filePath) {
-        this.id = UUID.randomUUID();
+        this(fileName, filePath, null, null);
+    }
+
+    public IngestionJob(
+            String fileName,
+            String filePath,
+            String targetSchema,
+            String targetTable
+    ) {
+        this(UUID.randomUUID(), fileName, filePath, targetSchema, targetTable);
+    }
+
+    // Constructor allowing an explicitly supplied job ID.
+    public IngestionJob(
+            UUID id,
+            String fileName,
+            String filePath,
+            String targetSchema,
+            String targetTable
+    ) {
+        this.id = id != null ? id : UUID.randomUUID();
         this.fileName = fileName;
         this.filePath = filePath;
+        this.targetSchema = targetSchema;
+        this.targetTable = targetTable;
         this.status = IngestionJobStatus.PENDING;
+        this.totalRows = 0;
+        this.processedRows = 0;
+        this.failedRows = 0;
     }
 
     @PrePersist
     void setCreatedAt() {
         if (createdAt == null) {
             createdAt = OffsetDateTime.now();
+        }
+
+        if (id == null) {
+            id = UUID.randomUUID();
+        }
+
+        if (status == null) {
+            status = IngestionJobStatus.PENDING;
         }
     }
 
@@ -73,6 +115,14 @@ public class IngestionJob {
 
     public String getFilePath() {
         return filePath;
+    }
+
+    public String getTargetSchema() {
+        return targetSchema;
+    }
+
+    public String getTargetTable() {
+        return targetTable;
     }
 
     public IngestionJobStatus getStatus() {
@@ -105,7 +155,12 @@ public class IngestionJob {
 
     public void startProcessing() {
         this.status = IngestionJobStatus.PROCESSING;
-        this.startedAt = OffsetDateTime.now();
+
+        if (this.startedAt == null) {
+            this.startedAt = OffsetDateTime.now();
+        }
+
+        this.completedAt = null;
     }
 
     public void updateProgress(long total, long processed, long failed) {
@@ -118,6 +173,7 @@ public class IngestionJob {
         this.status = hasErrors
                 ? IngestionJobStatus.COMPLETED_WITH_ERRORS
                 : IngestionJobStatus.COMPLETED;
+
         this.completedAt = OffsetDateTime.now();
     }
 

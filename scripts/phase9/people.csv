@@ -1,0 +1,4 @@
+person_id,full_name,email,age,city
+1001,Alice Johnson,alice@example.com,28,Hyderabad
+1002,Bob Smith,bob@example.com,31,Dublin
+1003,Charlie Brown,charlie@example.com,25,London

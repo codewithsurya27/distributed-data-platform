@@ -3,6 +3,12 @@ package com.surya.DistributedDataPlatform.processing.service;
 
 import com.surya.DistributedDataPlatform.jobs.entity.IngestionJob;
 import com.surya.DistributedDataPlatform.jobs.repository.IngestionJobRepository;
+import com.surya.DistributedDataPlatform.jobs.service.PostgreSqlDestinationService;
+import com.surya.DistributedDataPlatform.jobs.dto.DestinationTableMetadata;
+import com.surya.DistributedDataPlatform.processing.dynamic.DynamicCsvRow;
+import com.surya.DistributedDataPlatform.processing.dynamic.DynamicCsvValidationError;
+import com.surya.DistributedDataPlatform.processing.dynamic.DynamicCsvValidationResult;
+import com.surya.DistributedDataPlatform.processing.dynamic.DynamicCsvValidationService;
 import com.surya.DistributedDataPlatform.processing.parser.CsvRecordParser;
 import com.surya.DistributedDataPlatform.processing.validator.CustomerRecordValidator;
 import com.surya.DistributedDataPlatform.records.entity.CustomerRecord;
@@ -15,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -38,21 +45,49 @@ public class BatchProcessingService {
     private final BatchPersistenceService persistenceService;
     private final MeterRegistry meterRegistry;
     private final int batchSize;
+    private final DynamicCsvValidationService dynamicValidator;
+    private final PostgreSqlDestinationService destinationService;
 
+    /** Compatibility constructor retained for existing unit tests. */
     public BatchProcessingService(
             IngestionJobRepository jobRepository,
             CsvRecordParser parser,
             CustomerRecordValidator validator,
             BatchPersistenceService persistenceService,
             MeterRegistry meterRegistry,
-            @Value("${app.processing.batch-size:500}") int batchSize) {
+            int batchSize) {
+        this(jobRepository, parser, validator, persistenceService, meterRegistry,
+                batchSize, null, null, true);
+    }
 
+    @Autowired
+    public BatchProcessingService(
+            IngestionJobRepository jobRepository,
+            CsvRecordParser parser,
+            CustomerRecordValidator validator,
+            BatchPersistenceService persistenceService,
+            MeterRegistry meterRegistry,
+            @Value("${app.processing.batch-size:500}") int batchSize,
+            DynamicCsvValidationService dynamicValidator,
+            PostgreSqlDestinationService destinationService) {
+        this(jobRepository, parser, validator, persistenceService, meterRegistry,
+                batchSize, dynamicValidator, destinationService, true);
+    }
+
+    private BatchProcessingService(
+            IngestionJobRepository jobRepository, CsvRecordParser parser,
+            CustomerRecordValidator validator, BatchPersistenceService persistenceService,
+            MeterRegistry meterRegistry, int batchSize,
+            DynamicCsvValidationService dynamicValidator,
+            PostgreSqlDestinationService destinationService, boolean marker) {
         this.jobRepository = jobRepository;
         this.parser = parser;
         this.validator = validator;
         this.persistenceService = persistenceService;
         this.meterRegistry = meterRegistry;
         this.batchSize = batchSize;
+        this.dynamicValidator = dynamicValidator;
+        this.destinationService = destinationService;
     }
 
     public void process(UUID jobId) {
@@ -102,7 +137,17 @@ public class BatchProcessingService {
                         "CSV file does not exist: " + file);
             }
 
-            // Remove partial data from any previous attempt.
+            // Jobs with a destination use the generic PostgreSQL pipeline.
+            if (job.getTargetSchema() != null && job.getTargetTable() != null) {
+                processDynamicJob(job, file, startedAt);
+                return;
+            }
+            if ((job.getTargetSchema() == null) != (job.getTargetTable() == null)) {
+                throw new IllegalStateException(
+                        "Both target schema and target table must be configured");
+            }
+
+            // Legacy customer-specific jobs retain their original behavior.
             persistenceService.prepareAttempt(jobId);
 
             long totalRowsRead = 0;
@@ -241,6 +286,115 @@ public class BatchProcessingService {
                     meterRegistry.timer("ingestion.job.duration")
             );
         }
+    }
+
+
+    private void processDynamicJob(IngestionJob job, Path file, long startedAt)
+            throws IOException {
+
+        if (dynamicValidator == null || destinationService == null) {
+            throw new IllegalStateException(
+                    "Dynamic ingestion dependencies are not configured");
+        }
+
+        UUID jobId = job.getId();
+        String schema = job.getTargetSchema();
+        String table = job.getTargetTable();
+        DestinationTableMetadata metadata =
+                destinationService.getTableMetadata(schema, table);
+
+        persistenceService.prepareDynamicAttempt(jobId);
+
+        DynamicCsvValidationResult result =
+                dynamicValidator.validate(file, metadata);
+
+        long failedRows = result.getFailedRowCount();
+        long validRows = result.getValidRowCount();
+        long duplicateRowsSoFar = 0;
+        long batchNumber = 0;
+
+        for (long firstRow = 2; firstRow <= result.totalRows() + 1;
+             firstRow += batchSize) {
+
+            long lastRow = Math.min(
+                    firstRow + batchSize - 1,
+                    result.totalRows() + 1
+            );
+
+            final long batchStart = firstRow;
+            final long batchEnd = lastRow;
+
+            List<DynamicCsvRow> validBatch = result.validRows().stream()
+                    .filter(row -> row.rowNumber() >= batchStart
+                            && row.rowNumber() <= batchEnd)
+                    .toList();
+
+            List<DynamicCsvValidationError> errorBatch =
+                    result.errors().stream()
+                            .filter(error -> error.rowNumber() >= batchStart
+                                    && error.rowNumber() <= batchEnd)
+                            .toList();
+
+            long duplicateCount = persistenceService.saveDynamicBatch(
+                    jobId,
+                    schema,
+                    table,
+                    metadata,
+                    validBatch,
+                    errorBatch,
+                    result.totalRows(),
+                    lastRow - 1,
+                    failedRows + duplicateRowsSoFar
+            );
+
+            duplicateRowsSoFar += duplicateCount;
+
+            batchNumber++;
+
+            meterRegistry.counter("ingestion.records.processed")
+                    .increment(validBatch.size() - duplicateCount);
+
+            meterRegistry.counter("ingestion.records.rejected")
+                    .increment(
+                            errorBatch.stream()
+                                    .map(DynamicCsvValidationError::rowNumber)
+                                    .distinct()
+                                    .count()
+                                    + duplicateCount
+                    );
+
+            log.info(
+                    "Dynamic CSV batch persisted: batchNumber={}, destination={}.{}, rowsReadSoFar={}, validRows={}, validationRejectedRows={}, duplicateRows={}",
+                    batchNumber,
+                    schema,
+                    table,
+                    lastRow - 1,
+                    validBatch.size(),
+                    errorBatch.size(),
+                    duplicateCount
+            );
+        }
+
+        long totalFailedRows = failedRows + duplicateRowsSoFar;
+
+        persistenceService.finish(jobId, totalFailedRows > 0);
+
+        meterRegistry.counter("ingestion.jobs.completed").increment();
+
+        long durationMs =
+                (System.nanoTime() - startedAt) / 1_000_000;
+
+        log.info(
+                "Dynamic CSV ingestion completed: destination={}.{}, totalRows={}, validRows={}, rejectedRows={}, duplicateRows={}, batches={}, durationMs={}",
+                schema,
+                table,
+                result.totalRows(),
+                validRows,
+                totalFailedRows,
+                duplicateRowsSoFar,
+                batchNumber,
+                durationMs
+        );
     }
 
     private void persistAndLogBatch(
