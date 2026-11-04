@@ -1,0 +1,4 @@
+person_id,full_name,email,age,city
+1004,Diana Prince,diana@example.com,29,Chennai
+1001,Duplicate Alice,duplicate.alice@example.com,30,Hyderabad
+1005,Invalid Age,invalid.age@example.com,not-a-number,Delhi

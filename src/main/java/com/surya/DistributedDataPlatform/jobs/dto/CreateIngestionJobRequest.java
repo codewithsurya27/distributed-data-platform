@@ -4,7 +4,17 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 public record CreateIngestionJobRequest(
-        @NotBlank @Size(max = 255) String fileName,
-        @Size(max = 1000) String filePath
+        @NotBlank
+        @Size(max = 255)
+        String fileName,
+
+        @Size(max = 1000)
+        String filePath,
+
+        @Size(max = 63)
+        String targetSchema,
+
+        @Size(max = 63)
+        String targetTable
 ) {
 }
