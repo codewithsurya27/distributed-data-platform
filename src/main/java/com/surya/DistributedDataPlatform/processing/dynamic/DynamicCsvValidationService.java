@@ -184,7 +184,11 @@ public class DynamicCsvValidationService {
                 );
             }
 
-            String normalizedHeader = normalize(header);
+            // Remove a UTF-8 BOM from the beginning of the header.
+            // Keep the original header for CSVRecord lookup.
+            String normalizedHeader = normalize(
+                    removeBom(header)
+            );
 
             DestinationColumnMetadata column =
                     databaseColumns.get(normalizedHeader);
@@ -213,6 +217,14 @@ public class DynamicCsvValidationService {
         }
 
         return mapping;
+    }
+
+    private String removeBom(String value) {
+        if (value.startsWith("\uFEFF")) {
+            return value.substring(1);
+        }
+
+        return value;
     }
 
     private void validateRequiredColumns(

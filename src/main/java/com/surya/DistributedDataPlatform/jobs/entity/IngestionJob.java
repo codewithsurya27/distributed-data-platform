@@ -178,6 +178,10 @@ public class IngestionJob {
     }
 
     public void fail() {
+        if (this.status == IngestionJobStatus.COMPLETED) {
+            return;
+        }
+
         this.status = IngestionJobStatus.FAILED;
         this.completedAt = OffsetDateTime.now();
     }

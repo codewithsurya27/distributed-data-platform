@@ -190,4 +190,32 @@ class DynamicCsvValidationServiceTest {
         assertTrue(exception.getMessage().contains("Generated destination column"));
     }
 
+    @Test
+    void handlesUtf8BomInFirstCsvHeader() throws Exception {
+        Path csv = tempDir.resolve("customers-with-bom.csv");
+
+        Files.writeString(csv, """
+            \uFEFFcustomerId,name,email
+            C001,Alice,alice@example.com
+            C002,Bob,bob@example.com
+            """);
+
+        DynamicCsvValidationResult result =
+                service.validate(csv, metadata());
+
+        assertEquals(2, result.totalRows());
+        assertEquals(2, result.getValidRowCount());
+        assertEquals(0, result.getFailedRowCount());
+
+        assertEquals(
+                "C001",
+                result.validRows().get(0).values().get("customer_id")
+        );
+
+        assertEquals(
+                "alice@example.com",
+                result.validRows().get(0).values().get("email")
+        );
+    }
+
 }
