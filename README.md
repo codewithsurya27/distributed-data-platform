@@ -49,8 +49,11 @@ release-readiness verification, has been completed and merged into
 -   [Data model](#data-model)
 -   [Technology stack](#technology-stack)
 -   [Project structure](#project-structure)
--   [Run with Docker Compose](#run-with-docker-compose)
--   [Run locally without Docker](#run-locally-without-docker)
+-   [Run the application](#run-the-application)
+    -   [Setup A: IntelliJ + Docker infrastructure](#setup-a-intellij--docker-infrastructure)
+    -   [Setup B: All services in Docker](#setup-b-all-services-in-docker)
+    -   [Switch between setups](#switch-between-setups)
+    -   [Logs and health checks](#logs-and-health-checks)
 -   [API usage](#api-usage)
 -   [Testing](#testing)
 -   [Observability](#observability)
@@ -205,6 +208,8 @@ The screenshots below show the main API and database workflow. They are
 stored in `docs/images/` and are rendered directly by GitHub.
 
 ### CSV upload
+
+The examples below use the Setup B host port (`8081`). For Setup A, replace `8081` with `8080` in the application URL.
 
 ![CSV upload request and accepted response](docs/images/upload-job.png)
 
@@ -513,128 +518,251 @@ for all DTOs, entities, repositories, controllers, and tests.
 
 ------------------------------------------------------------------------
 
-## Run with Docker Compose
+## Run the application
+
+The project supports two execution modes. Use **Setup A** for everyday
+development and IntelliJ debugging. Use **Setup B** to run the complete
+application stack in Docker.
 
 ### Prerequisites
 
--   Git
--   Docker Desktop with Docker Compose
+- Git
+- Docker Desktop with Docker Compose
+- Java 25 JDK
+- PowerShell (for the provided Windows commands)
 
-### 1. Clone the repository
+### Environment configuration
 
-``` powershell
+Clone the repository:
+
+```powershell
 git clone https://github.com/codewithsurya27/distributed-data-platform.git
 cd distributed-data-platform
 ```
 
-### 2. Configure the environment
+Optionally create your local environment file:
 
-``` powershell
+```powershell
 Copy-Item .env.example .env
 ```
 
-Update `.env` if you want different local database credentials. The
-`.env` file is excluded from Git; do not commit real credentials.
+Update `.env` if you want different local database credentials. The `.env`
+file is excluded from Git; do not commit real credentials.
 
-### 3. Build and start services
+### Setup A: IntelliJ + Docker infrastructure
 
-``` powershell
-docker compose -f compose.yml up --build -d
+**Recommended for development, breakpoints, and debugging.**
+
+In this mode, PostgreSQL and Kafka run in Docker, while Spring Boot runs
+directly on your machine from IntelliJ.
+
+#### 1. Start PostgreSQL and Kafka
+
+```powershell
+docker compose -f compose.yml up -d postgres kafka
 ```
 
-This starts:
+Check their status:
 
--   Spring Boot application
--   PostgreSQL
--   Apache Kafka
-
-The application image uses a multi-stage Docker build. Gradle builds the
-executable JAR in the build stage, while the runtime stage uses a Java
-25 JRE image and runs as a non-root user.
-
-### 4. Check service status
-
-``` powershell
+```powershell
 docker compose -f compose.yml ps
 ```
 
-View application logs:
+Wait until PostgreSQL and Kafka report healthy.
 
-``` powershell
-docker compose -f compose.yml logs --tail=100 app
+#### 2. Run Spring Boot from IntelliJ
+
+1. Open the project in IntelliJ IDEA.
+2. Open `DistributedDataPlatformApplication.java`.
+3. Open **Run → Edit Configurations** and select the Spring Boot run
+   configuration.
+4. Leave **Active profiles** empty. Do not activate the `docker` profile.
+5. Click **Debug** to use breakpoints, or **Run** for normal execution.
+
+The default `application.properties` connects to the Docker-hosted services
+through their published host ports:
+
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5433/dataplatform
+spring.kafka.bootstrap-servers=localhost:9093
 ```
 
-Follow application logs:
+The application is available at `http://localhost:8080`.
 
-``` powershell
-docker compose -f compose.yml logs -f app
+#### 3. Run the application from PowerShell (optional)
+
+Instead of IntelliJ, you can start the local application with:
+
+```powershell
+.\gradlew.bat bootRun
 ```
 
-### Service ports
+Keep the default Spring profile active so it uses `localhost:5433` and
+`localhost:9093`.
 
-| Service | Host port | Container port |
-|---|---:|---:|
-| Spring Boot application | 8081 | 8080 |
-| PostgreSQL | 5433 | 5432 |
-| Kafka | 9093 | 9092 |
+### Setup B: All services in Docker
+
+Use this mode to run the Spring Boot application, PostgreSQL, and Kafka
+together through Docker Compose.
+
+The Docker image uses the executable JAR built on the host machine. This
+keeps Gradle distribution downloads out of the Docker image build.
+
+#### 1. Build and start with one command
+
+Create `start-docker.ps1` in the repository root with the following contents:
+
+```powershell
+$ErrorActionPreference = "Stop"
+
+Write-Host "`n[1/3] Building Spring Boot application..." -ForegroundColor Cyan
+.\gradlew.bat clean bootJar -x test
+if ($LASTEXITCODE -ne 0) { throw "Gradle build failed. Docker deployment cancelled." }
+
+Write-Host "`n[2/3] Building and starting Docker services..." -ForegroundColor Cyan
+docker compose -f compose.yml up -d --build
+if ($LASTEXITCODE -ne 0) { throw "Docker Compose failed." }
+
+Write-Host "`n[3/3] Checking container status..." -ForegroundColor Cyan
+docker compose -f compose.yml ps
+
+Write-Host "`nApplication deployment completed." -ForegroundColor Green
+Write-Host "Application URL: http://localhost:8081"
+```
+
+Then run the script from the repository root:
+
+```powershell
+.\start-docker.ps1
+```
+
+The script:
+1. Runs `.\gradlew.bat clean bootJar -x test` on the host.
+2. Stops and cancels deployment if the Gradle build fails.
+3. Builds the Docker image and starts all Compose services.
+4. Displays the service status.
+
+If you prefer to run the steps separately:
+
+```powershell
+.\gradlew.bat clean bootJar -x test
+docker compose -f compose.yml up -d --build
+```
+
+**Important:** When building the Docker image directly, build the JAR first.
+The Dockerfile copies the JAR from `build/libs/`; it does not run Gradle
+inside the image build.
+
+#### 2. Check service status
+
+```powershell
+docker compose -f compose.yml ps
+```
+
+The application should be available at `http://localhost:8081`.
 
 Inside the Compose network, the application connects to PostgreSQL using
 `postgres:5432` and Kafka using `kafka:29092`.
 
-### 5. Stop services
+### Switch between setups
 
-``` powershell
+Stop the application in the current runtime before starting it in the other
+runtime. Do not run both Spring Boot instances at the same time: they use the
+same Kafka consumer group and can process messages concurrently.
+
+**Switch from full Docker to IntelliJ:**
+
+```powershell
+docker compose -f compose.yml stop app
+docker compose -f compose.yml up -d postgres kafka
+```
+
+Then run or debug `DistributedDataPlatformApplication` in IntelliJ with the
+default profile (no active `docker` profile).
+
+**Switch from IntelliJ to full Docker:**
+
+1. Stop the Spring Boot application using IntelliJ's Stop button.
+2. Run:
+
+```powershell
+.\start-docker.ps1
+```
+
+**Stop all Docker services:**
+
+```powershell
+docker compose -f compose.yml stop
+```
+
+This stops the containers but preserves named volumes and their data.
+
+To stop and remove containers and the Compose network while retaining
+named volumes:
+
+```powershell
 docker compose -f compose.yml down
 ```
 
-This stops and removes containers and the network but retains named
-volumes.
+**Warning:** The following command also deletes the named PostgreSQL and
+Kafka volumes and their stored data. Use it only when you intentionally
+want to reset the local environment:
 
-To remove persistent database and Kafka data as well:
-
-``` powershell
+```powershell
 docker compose -f compose.yml down -v
 ```
 
-**Warning:** This deletes the named volumes and their stored data. Only
-use it when you intentionally want to reset the local environment.
+### Logs and health checks
 
-------------------------------------------------------------------------
+**Follow Spring Boot logs in full-Docker mode:**
 
-## Run locally without Docker
-
-For standalone application development, Java 25 and locally accessible
-PostgreSQL and Kafka instances are required.
-
-Configure the local datasource and Kafka bootstrap server in
-`application.properties` or through environment variables.
-
-Typical local endpoints:
-
-``` text
-PostgreSQL: localhost:5432
-Kafka:      localhost:9092
+```powershell
+docker compose -f compose.yml logs -f app
 ```
 
-Run the application:
+**Follow logs from all services:**
 
-``` powershell
-.\gradlew.bat bootRun
+```powershell
+docker compose -f compose.yml logs -f
 ```
 
-Run tests:
+**Follow only PostgreSQL and Kafka logs in Setup A:**
 
-``` powershell
-.\gradlew.bat clean test
+```powershell
+docker compose -f compose.yml logs -f postgres kafka
 ```
 
-Open the Gradle test report:
+In Setup A, application logs appear in the IntelliJ Run/Debug console.
+In Setup B, application logs appear in Docker Desktop's app container
+**Logs** tab or through the Docker Compose commands above.
 
-``` powershell
-Start-Process .\build\reports\tests\test\index.html
-```
+Health endpoints:
 
-------------------------------------------------------------------------
+| Mode | Overall health URL |
+|---|---|
+| Setup A (IntelliJ) | `http://localhost:8080/actuator/health` |
+| Setup B (Docker) | `http://localhost:8081/actuator/health` |
+
+Other Actuator endpoints use the same host and port with these paths:
+
+- `/actuator/health/db`
+- `/actuator/health/kafka`
+- `/actuator/health/liveness`
+- `/actuator/health/readiness`
+- `/actuator/metrics`
+
+### Service ports
+
+| Service | Setup A: host connection | Setup B: host connection | Docker internal address |
+|---|---:|---:|---|
+| Spring Boot application | 8080 | 8081 | `app:8080` |
+| PostgreSQL | 5433 | 5433 | `postgres:5432` |
+| Kafka | 9093 | 9093 | `kafka:29092` |
+
+The Spring profile is the default profile in Setup A and `docker` in Setup B.
+The Docker Compose `app` service sets `SPRING_PROFILES_ACTIVE=docker`.
+
+---
 
 ## API usage
 
@@ -642,6 +770,8 @@ The application exposes CSV upload, ingestion-job, and destination
 metadata APIs.
 
 ### CSV upload
+
+The examples below use the Setup B host port (`8081`). For Setup A, replace `8081` with `8080` in the application URL.
 
 ``` http
 POST http://localhost:8081/api/v1/ingestion-jobs
@@ -845,7 +975,7 @@ obtain the latest result.
 | `/actuator/health/liveness` | Application liveness |
 | `/actuator/health/readiness` | Application readiness |
 
-For the Docker deployment, use port `8081`:
+Use port `8080` in Setup A (IntelliJ) or `8081` in Setup B (Docker):
 
 ``` text
 http://localhost:8081/actuator/health
@@ -900,8 +1030,11 @@ The CI workflow:
 5.  Executes the Gradle test suite.
 6.  Builds the Docker image.
 
-The Docker build uses the multi-stage Dockerfile, so the workflow does
-not depend on a prebuilt JAR from the developer's machine.
+Because the local Dockerfile packages a host-built JAR, the CI workflow
+must run the Gradle `bootJar` task before its Docker image build. Keep that
+step in sync with the Dockerfile whenever the container build strategy
+changes. The local `start-docker.ps1` script performs this sequence on
+Windows.
 
 Check the **Actions** tab in the GitHub repository for workflow
 execution results.
