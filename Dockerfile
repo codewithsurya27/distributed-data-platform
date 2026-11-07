@@ -1,39 +1,27 @@
-# Stage 1: Build the Spring Boot application
-FROM eclipse-temurin:25-jdk AS build
-
-WORKDIR /workspace
-
-COPY . .
-
-RUN chmod +x ./gradlew
-
-# Build the executable JAR.
-# Tests are executed separately by GitHub Actions.
-RUN ./gradlew --no-daemon clean bootJar -x test
-
-# Copy the executable JAR to a predictable location
-RUN set -eux; \
-    JAR="$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' | head -n 1)"; \
-    test -n "$JAR"; \
-    cp "$JAR" /workspace/app.jar
-
-
-# Stage 2: Run the application
+# The executable Spring Boot JAR is built on the host or CI runner.
+# This image only packages and runs that JAR.
 FROM eclipse-temurin:25-jre
 
 WORKDIR /app
 
-# Create a non-root application user
-RUN useradd --system --uid 10001 appuser
-
-# Create uploads directory and grant ownership
-RUN mkdir -p /app/uploads \
+# Create a non-root application user and uploads directory.
+RUN useradd --system --uid 10001 appuser \
+    && mkdir -p /app/uploads /tmp/build \
     && chown -R appuser:appuser /app
 
-# Copy the executable JAR
-COPY --from=build --chown=appuser:appuser /workspace/app.jar /app/app.jar
+# Copy the Gradle build output temporarily.
+COPY build/libs/ /tmp/build/
 
-# Run as non-root user
+# Select only the executable Spring Boot JAR.
+# Exclude Gradle's optional *-plain.jar.
+RUN set -eux; \
+    JAR="$(find /tmp/build -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' | head -n 1)"; \
+    test -n "$JAR"; \
+    cp "$JAR" /app/app.jar; \
+    rm -rf /tmp/build; \
+    chown appuser:appuser /app/app.jar
+
+# Run the application as a non-root user.
 USER 10001
 
 EXPOSE 8080

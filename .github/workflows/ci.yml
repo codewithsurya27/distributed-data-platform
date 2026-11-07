@@ -62,6 +62,10 @@ jobs:
           chmod +x ./gradlew
           ./gradlew clean test --no-daemon
 
+      # Build the executable JAR on the GitHub runner.
+      # The Docker image will only package and run this JAR.
+      - name: Build executable Spring Boot JAR
+        run: ./gradlew bootJar -x test --no-daemon
+
       - name: Build Docker image
-        run: |
-          docker build -t distributed-data-platform:${{ github.sha }} .
+        run: docker build -t distributed-data-platform:${{ github.sha }} .
